@@ -11,7 +11,7 @@ const steps = [
     hint:'Zwei kurze Angaben helfen uns, das wirtschaftliche Potenzial einzuordnen.',
     groups:[
       {key:'cost',title:'Monatliche Stromkosten',answers:['Unter 2.000 €','2.000 – 5.000 €','5.000 – 10.000 €','10.000 – 25.000 €','Über 25.000 €','Nicht sicher']},
-      {key:'lever',title:'Größter Kostenhebel',answers:['Hohe Lastspitzen / Leistungspreise','Hoher Stromverbrauch insgesamt','PV-Überschüsse bleiben ungenutzt','Neue Ladeinfrastruktur ist geplant','Schwankende Strompreise','Noch nicht eindeutig']}
+      {key:'lever',title:'Größter Kostenhebel',multiple:true,answers:['Hohe Lastspitzen / Leistungspreise','Hoher Stromverbrauch insgesamt','PV-Überschüsse bleiben ungenutzt','Neue Ladeinfrastruktur ist geplant','Schwankende Strompreise','Noch nicht eindeutig']}
     ]
   },
   {
@@ -62,7 +62,7 @@ function showRejection(reason){
 
 function stepComplete(step,index){
   if(step.form) return Boolean(data[index]);
-  if(step.groups) return step.groups.every(group => data[index]?.[group.key]);
+  if(step.groups) return step.groups.every(group => group.multiple ? data[index]?.[group.key]?.length : data[index]?.[group.key]);
   return Boolean(data[index]);
 }
 
@@ -77,9 +77,19 @@ function validateForm(){
   next.disabled = !valid;
 }
 
-function selectGroup(groupKey,value){
-  data[current] = {...(data[current] || {}),[groupKey]:value};
-  if(groupKey==='cost' && value==='Unter 2.000 €'){
+function selectGroup(group,value){
+  if(group.multiple){
+    const selected = data[current]?.[group.key] || [];
+    const isUnsure = value==='Noch nicht eindeutig';
+    const nextValues = selected.includes(value)
+      ? selected.filter(item => item!==value)
+      : isUnsure ? [value] : [...selected.filter(item => item!=='Noch nicht eindeutig'),value];
+    data[current] = {...(data[current] || {}),[group.key]:nextValues};
+    render();
+    return;
+  }
+  data[current] = {...(data[current] || {}),[group.key]:value};
+  if(group.key==='cost' && value==='Unter 2.000 €'){
     showRejection('stromkosten_unter_2000');
     return;
   }
@@ -98,7 +108,10 @@ function scoreLead(){
   };
   Object.keys(data).filter(key => /^\d+$/.test(key)).forEach(key => {
     const value = data[key];
-    if(value && typeof value==='object') Object.values(value).forEach(answer => {score += points[answer] || 0});
+    if(value && typeof value==='object') Object.entries(value).forEach(([group,answer]) => {
+      if(Array.isArray(answer)) score += Math.min(group==='lever'?12:Infinity,answer.reduce((sum,item)=>sum+(points[item]||0),0));
+      else score += points[answer] || 0;
+    });
     else score += points[value] || 0;
   });
   return {score,tier:score>=75?'A':score>=45?'B':'C'};
@@ -137,12 +150,14 @@ function render(){
     step.groups.forEach(group => {
       const section = document.createElement('section');
       section.className = 'answer-group';
-      section.innerHTML = `<h2>${group.title}</h2><div class="group-options"></div>`;
+      section.innerHTML = `<h2>${group.title}${group.multiple?'<span>Mehrfachauswahl möglich</span>':''}</h2><div class="group-options"></div>`;
       group.answers.forEach(answer => {
         const button = document.createElement('button');
-        button.className = 'answer'+(data[current]?.[group.key]===answer?' selected':'');
+        const selected = group.multiple ? data[current]?.[group.key]?.includes(answer) : data[current]?.[group.key]===answer;
+        button.className = 'answer'+(selected?' selected':'');
+        button.setAttribute('aria-pressed',selected?'true':'false');
         button.textContent = answer;
-        button.onclick = () => selectGroup(group.key,answer);
+        button.onclick = () => selectGroup(group,answer);
         section.querySelector('.group-options').appendChild(button);
       });
       answers.appendChild(section);
